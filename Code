@@ -1,1 +1,282 @@
-Hello World.
+#ifndef APPLICATION_H
+#define APPLICATION_H
+
+#include <iostream>
+#include "ucm_random.h"
+#include <bobcat_ui/all.h>
+#include <fstream>
+#include <set>
+
+class Application : public bobcat::Application_ {
+    bobcat::Window* window;
+    std::vector<bobcat::Button*> keyboard;
+
+    bobcat::TextBox* titleTextbox;
+
+    // state variables
+    std::string currentScreen;
+    RNG generator;
+    std::string wordToGuess;
+    std::string displayedWord;
+    std::set<char> guessedLetters;
+    int incorrectGuesses;
+    int maxIncorrectGuesses = 6;
+
+    // shared screen variables
+    bobcat::Button* returnToMainMenuButton;
+
+    // main menu screen variables
+    bobcat::Button* playGameButton;
+    bobcat::Button* instructionsButton;
+    bobcat::Button* statsButton;
+    bobcat::Button* quitGameButton;
+
+    // instructions screen variables
+    bobcat::TextBox* instructionsTextbox;
+
+    // statistics screen variables
+    bobcat::TextBox* statisticsWordTextbox;
+    bobcat::TextBox* statisticsAttemptsTextbox;
+    bobcat::TextBox* statisticsOutcomesTextbox;
+
+    // game screen UI
+    bobcat::TextBox* wordTextbox;
+    bobcat::TextBox* guessedTextbox;
+    bobcat::Button* giveUpButton;
+
+    std::vector<std::string> wordList = {"POWER", "HOUSE", "ROBOT", "STUDY", "RUFUS"};
+
+    void writeDataToFile(std::string word, int guesses, std::string outcome) {
+        std::fstream file;
+        file.open("data/statistics.csv", std::ios::app);
+        if (file.is_open()) {
+            file << word << "," << guesses << "," << outcome << std::endl;
+            file.close();
+        }
+    }
+
+    void readStatsFromFile() {
+        std::fstream file("data/statistics.csv", std::ios::in);
+
+        if (file.is_open()) {
+            std::string line;
+            statisticsWordTextbox->label("Word\n");
+            statisticsAttemptsTextbox->label("Guesses\n");
+            statisticsOutcomesTextbox->label("Outcome\n");
+
+            while (getline(file, line)) {
+                std::stringstream ss(line);
+                std::string word, guesses, outcome;
+                getline(ss, word, ',');
+                getline(ss, guesses, ',');
+                getline(ss, outcome, ',');
+
+                statisticsWordTextbox->label(statisticsWordTextbox->label() + word + "\n");
+                statisticsAttemptsTextbox->label(statisticsAttemptsTextbox->label() + guesses + "\n");
+                statisticsOutcomesTextbox->label(statisticsOutcomesTextbox->label() + outcome + "\n");
+            }
+            file.close();
+        }
+    }
+
+    void hideAll() {
+        playGameButton->hide();
+        instructionsButton->hide();
+        statsButton->hide();
+        quitGameButton->hide();
+        returnToMainMenuButton->hide();
+        instructionsTextbox->hide();
+        statisticsWordTextbox->hide();
+        statisticsAttemptsTextbox->hide();
+        statisticsOutcomesTextbox->hide();
+        wordTextbox->hide();
+        guessedTextbox->hide();
+        giveUpButton->hide();
+
+        for (auto k : keyboard)
+            k->hide();
+    }
+
+    void renderCurrentScreen() {
+        hideAll();
+
+        if (currentScreen == "Main Menu") {
+            titleTextbox->label("Wacky Wordle");
+            playGameButton->show();
+            instructionsButton->show();
+            statsButton->show();
+            quitGameButton->show();
+        }
+        else if (currentScreen == "Instructions") {
+            titleTextbox->label("How to Play");
+            instructionsTextbox->show();
+            returnToMainMenuButton->show();
+        }
+        else if (currentScreen == "Statistics") {
+            readStatsFromFile();
+            titleTextbox->label("Statistics");
+            statisticsWordTextbox->show();
+            statisticsAttemptsTextbox->show();
+            statisticsOutcomesTextbox->show();
+            returnToMainMenuButton->show();
+        }
+        else if (currentScreen == "Game") {
+            startNewGame();
+            titleTextbox->label("Wacky Worlde");
+            wordTextbox->show();
+            guessedTextbox->show();
+            giveUpButton->show();
+            for (auto k : keyboard)
+                k->show();
+        }
+    }
+
+    void startNewGame() {
+        guessedLetters.clear();
+        incorrectGuesses = 0;
+        wordToGuess = wordList[generator.get(0, wordList.size() - 1)];
+        displayedWord = std::string(wordToGuess.length(), '_');
+        updateDisplay();
+    }
+
+    void updateDisplay() {
+        wordTextbox->label("Word: " + getDisplayedWord());
+        guessedTextbox->label("Wrong guesses: " + std::to_string(incorrectGuesses) + " / " + std::to_string(maxIncorrectGuesses));
+    }
+
+    std::string getDisplayedWord() {
+        std::string display;
+        for (char c : wordToGuess) {
+            display += guessedLetters.count(c) ? c : '_';
+            display += ' ';
+        }
+        return display;
+    }
+
+    void handleLetterGuess(char letter) {
+        if (guessedLetters.count(letter)) {
+            return; // already guessed
+        }
+
+        guessedLetters.insert(letter);
+
+        if (wordToGuess.find(letter) == std::string::npos) {
+            incorrectGuesses++;
+        }
+
+        updateDisplay();
+
+        if (getDisplayedWord().find('_') == std::string::npos) {
+            bobcat::showMessage("You win! The word was " + wordToGuess);
+            writeDataToFile(wordToGuess, guessedLetters.size(), "Win");
+            currentScreen = "Main Menu";
+            renderCurrentScreen();
+        }
+        else if (incorrectGuesses >= maxIncorrectGuesses) {
+            bobcat::showMessage("You lost! The word was " + wordToGuess);
+            writeDataToFile(wordToGuess, guessedLetters.size(), "Loss");
+            currentScreen = "Main Menu";
+            renderCurrentScreen();
+        }
+    }
+
+    void onKeyboardClick(bobcat::Widget* sender) {
+        std::string label = sender->label();
+        if (!label.empty()) {
+            handleLetterGuess(label[0]);
+        }
+    }
+
+    void setupKeyboardRow(const std::vector<std::string>& row, int y) {
+        int width = 30;
+        int height = 30;
+        int gap = 5;
+        int start = (window->w() - (row.size() * width + (row.size() - 1) * gap)) / 2;
+
+        for (std::string ch : row) {
+            auto* button = new bobcat::Button(start, y, width, height, ch);
+            button->color(fl_rgb_color(0, 0, 255));  
+            button->labelcolor(FL_WHITE);
+            ON_CLICK(button, Application::onKeyboardClick);
+            keyboard.push_back(button);
+            start += width + gap;
+        }
+    }
+
+    void setupKeyboard(int y) {
+        setupKeyboardRow({"Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"}, y);
+        setupKeyboardRow({"A", "S", "D", "F", "G", "H", "J", "K", "L"}, y + 35);
+        setupKeyboardRow({"Z", "X", "C", "V", "B", "N", "M"}, y + 70);
+    }
+
+    void handleNavigationClick(bobcat::Widget* sender) {
+        if (sender == playGameButton) {
+            currentScreen = "Game";
+        }
+        else if (sender == instructionsButton) {
+            currentScreen = "Instructions";
+        }
+        else if (sender == statsButton) {
+            currentScreen = "Statistics";
+        }
+        else if (sender == returnToMainMenuButton) {
+            currentScreen = "Main Menu";
+        }
+        else if (sender == quitGameButton) {
+            window->hide();
+            return;
+        }
+        renderCurrentScreen();
+    }
+
+    void handleGameClick(bobcat::Widget* sender) {
+        if (sender == giveUpButton) {
+            bobcat::showMessage("You gave up! The word was " + wordToGuess);
+            writeDataToFile(wordToGuess, guessedLetters.size(), "Loss");
+            currentScreen = "Main Menu";
+            renderCurrentScreen();
+        }
+    }
+
+public:
+    Application() {
+        window = new bobcat::Window(25, 75, 400, 450, "Wacky Wordle");
+        currentScreen = "Main Menu";
+
+        titleTextbox = new bobcat::TextBox(25, 25, 350, 25, "Wacky Wordle");
+        titleTextbox->align(FL_ALIGN_CENTER);
+        titleTextbox->labelsize(20);
+
+        playGameButton = new bobcat::Button(25, 100, 350, 50, "Play Game");
+        instructionsButton = new bobcat::Button(25, 175, 350, 50, "View Instructions");
+        statsButton = new bobcat::Button(25, 250, 350, 50, "View Statistics");
+        quitGameButton = new bobcat::Button(25, 325, 350, 50, "Quit Game");
+        ON_CLICK(playGameButton, Application::handleNavigationClick);
+        ON_CLICK(instructionsButton, Application::handleNavigationClick);
+        ON_CLICK(statsButton, Application::handleNavigationClick);
+        ON_CLICK(quitGameButton, Application::handleNavigationClick);
+
+        instructionsTextbox = new bobcat::TextBox(25, 100, 350, 100, "Guess the letters of the secret word.\nEach wrong guess brings you closer to losing!");
+
+        statisticsWordTextbox = new bobcat::TextBox(25, 100, 100, 250, "Word");
+        statisticsAttemptsTextbox = new bobcat::TextBox(125, 100, 100, 250, "Guesses");
+        statisticsOutcomesTextbox = new bobcat::TextBox(225, 100, 100, 250, "Outcome");
+
+        returnToMainMenuButton = new bobcat::Button(25, 370, 350, 25, "Return to Main Menu");
+        ON_CLICK(returnToMainMenuButton, Application::handleNavigationClick);
+
+        wordTextbox = new bobcat::TextBox(25, 75, 350, 30, "Word:");
+        guessedTextbox = new bobcat::TextBox(25, 110, 350, 30, "Wrong guesses:");
+        giveUpButton = new bobcat::Button(280, 350, 100, 25, "Give Up");
+        ON_CLICK(giveUpButton, Application::handleGameClick);
+
+        setupKeyboard(160);
+        renderCurrentScreen();
+
+        window->show();
+    }
+
+    friend struct AppTest;
+};
+
+#endif
